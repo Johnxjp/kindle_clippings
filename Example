@@ -1,9 +1,0 @@
-import KindleHighlightsExtractor
-from KindleHighlightsExtractor import KindleDictionary
-
-if __name__ == "__main__":
-    myHighlights = KindleHighlightsExtractor.extract_highlights("My Clippings.txt")
-    myKD = KindleDictionary(myHighlights)
-    myKD.write_clippings_to_file("The Richest Man in Babylon")
-    #will save all highlights from the book "let's go" in the current directory
-

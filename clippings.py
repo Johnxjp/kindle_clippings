@@ -204,7 +204,7 @@ class Clippings:
         :return: array of strings
         """
 
-        if self.library.get(book) is None:
+        if self.book_clippings.get(book) is None:
             raise Exception("{} is not a valid book.".format(book))
 
         return self.book_clippings[book][1]
