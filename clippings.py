@@ -217,8 +217,6 @@ class Clippings:
         :return: string, author
         """
 
-        # (Diamandis, Peter H.;Kotler, Steven)
-
         if self.library.get(book) is None:
             raise Exception("{} is not a valid book.".format(book))
 
