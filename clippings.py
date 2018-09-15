@@ -1,121 +1,178 @@
-import os
-import datetime
+from datetime import datetime
+import re
+import pickle
 import json
 
 class Clippings:
 
-    def __init__(self, clippings_file=None):
+    def __init__(self):
         """
-        Constructor for the Clippings object.
+        The clippings objects stores all the notes and highlights found in the clippings_file. The clippings_file is
+        the raw text file found on the Amazon Kindle device. It is usually named 'My Clippings.txt'.
 
-        Highlights from the Amazon Kindle are stored in a dictionary. The format is as follows:
-        {"date_of_last_highlight": datetime_object, "author": {"book_1": [clippings], "book_2":[clippings]}, ...}
+        Two pieces of information are stored:
+        1) The clippings by book. This is stored in a dictionary with the book as the keyword. Th value is a
+        dictionary containing the following [author, date last updated, clippings], where clippings is an array of
+        strings.
 
-        :param clippings_file: The raw text file obtained from the Amazon Kindle device.
+        2) The books by an author. In a separate dictionary, the author and all associated books are stored. This
+        way the user can ask for all clippings from a given author and the search can be performed quickly.
+
+        """
+
+        # Dictionary that stores the clippings by book. In addition, author and date last modified are stored per book.
+        # The format is {"book_name": [author_name, clippings], ...}, where clippings is an array of
+        # strings.
+        self.book_clippings = {}
+
+        # Dictionary to track authors and their books
+        self.library = {}
+
+        # Saves when the last extract was, only taking highlights after that date-time
+        self.last_modified_date = datetime.min
+
+        # Unknown authors
+        self.num_unknowns = 0
+
+    def load_from_text(self, clippings_file):
+        """
+        Loads the clippings from the Amazon Kindle 'My Clippings.txt' file. The format of a highlight is shown below.
+
+        ---------------------
+        Example:
+        The Autobiography of Benjamin Franklin (Franklin, Benjamin)
+        - Your Highlight on page 25 | location 498-498 | Added on Tuesday, 16 August 2016 19:45:26
+
+        The breaking into this money of Vernon's was one of the first great errata of my life;
+        ==========
+        ---------------------
+
+        :param clippings_file: The highlights from the kindle file
         :return: None
         """
 
-        if clippings_file == "":
-            raise Exception("This file is empty")
+        start_index = 0
 
-        self.highlights_dictionary = {"date_of_last_highlight": datetime.datetime.strptime("1900 1 1", "%Y %M %d")}
-        self.highlights = clippings_file
-        self.booklist = []
-        self.authorlist = []
-        self.last_modified_date = 0
+        with open(clippings_file, 'r') as f:
+            highlights = f.readlines()
 
-        # This processes the text file
-        self._add_highlights(clippings_file, self.highlights_dictionary["date_of_last_highlight"])
+        num_lines = len(highlights)
+        highlight_length = 5
+        # Every highlight contains 5 lines of information
+        # Line 1: book & author
+        # Line 2: Page location, date added
+        # Line 3: Blank line
+        # Line 4: The highlight / note
 
-    def load_clippings(self, dictionary_filepath_to_load=""):
-        if not dictionary_filepath_to_load.lower().endswith(".txt"):
-            raise Exception("Please make sure your file is a .txt file")
-        elif os.stat(dictionary_filepath_to_load).st_size == 0:
-            raise Exception("This file is empty")
+        # Searches for the place to start reading new highlights
+        for line_num in range(1, num_lines, highlight_length):  # The date is every 5 lines
+
+            if self._extract_date(highlights[line_num]) > self.last_modified_date:
+                start_index = line_num - 1 # -1 because the start of the highlight information is 1 line before the date
+                break
+
+        # max in case this is a new file
+        for line_num in range(max(0, start_index), num_lines, highlight_length):
+            clipping = highlights[line_num + 3].strip()  # +3 because the notes / highlight is 3 lines under the book / author line
+
+            # Check for blanks
+            if clipping == "":
+                continue
+
+            book = self._extract_book_title(highlights[line_num])
+            author = self._extract_author_name(highlights[line_num])
+
+            # Add clipping
+            if self.book_clippings.get(book) is None:
+                self.book_clippings[book] = [author, [clipping]]
+
+            else:
+                self.book_clippings[book][1].append(clipping)
+
+            # Add to library
+            if self.library.get(author) is None:
+                self.library[author] = set([book])
+            elif book not in self.library[author]:
+                self.library[author].add(book)
+
+
+        # Amazon stores every highlight in chronological order so it is ok to take the last highlight's date as the
+        # last modified date.
+        self.last_modified_date = self._extract_date(highlights[line_num + 1])  # Takes the date from the last highlight
+
+    def _extract_date(self, date_line):
+        """
+        Extracts the date from a highlight in the 'My Clippings.txt' file using regular expressions.
+
+        Dates are recorded on the second line of a highlight in the following format:
+        '- Your Highlight on page 43 | location 973-974 | Added on Thursday, 28 January 2016 08:33:31'
+
+        :param date_line: the string that contains the date of the highlight in the kindle file
+        :return: datetime object. Min if can't find a match
+        """
+        p = re.compile("\d{2}\s\D+\s\d{4}\s\d{2}:\d{2}:\d{2}", re.IGNORECASE)
+        match = re.search(p, date_line)
+
+        if match is None:
+            return datetime.min
         else:
-            with open(dictionary_filepath_to_load, 'r') as infile:
-                self.highlights_dictionary = json.load(infile)
-                self.highlights_dictionary["date_of_last_highlight"] = \
-                    datetime.datetime.strptime(self.highlights_dictionary["date_of_last_highlight"],
-                                               "%Y-%m-%d %H:%M:%S")
+            return datetime.strptime(match.group(0), "%d %B %Y %H:%M:%S")
 
-        self._add_highlights(highlights, self.highlights_dictionary["date_of_last_highlight"])
-        self.booklist = self._get_book_list()
-        self.authorlist = self._get_author_list()
-        self.last_modified_date = self._get_last_modified_date()
+    def _extract_book_title(self, book_and_author_string):
+        """
+        Returns the book title from the book and author line in the Kindle 'My Clippings.txt' file.
 
+        The format is generally 'book title (author last name, author first name)'
+        e.g. Influence (Cialdini PhD, Robert B.)
 
-    def get_book_list_by_author(self, author_name):
-        """
-        :param author_name: the name of the author
-        :return: the books belonging to that author
-        """
-        return self.highlights_dictionary[author_name]
+        Sometimes, the publisher is added so that the format is 'book title (publisher) (author last name, author first name)'
+        Influence (Collins Business Essentials) (Cialdini PhD, Robert B.)
 
-    def get_highlights_by_book(self, book_name):
+        :param book_and_author_string: string that contains the book and the author's name
+        :return: string, title of the book
         """
-        :param book_name: the name of the book
-        :return: all the highlights in that book
-        """
-        for author in self.authorlist:
-            if book_name in self.highlights_dictionary[author]:
-                return self.highlights_dictionary[author][book_name]
 
-        return "This book was not found. Please check the spelling."
+        ind = book_and_author_string.find("(")
+        if ind == -1:
+            return book_and_author_string.strip()
 
-    def save_dict(self, dictionary_file_to_save_full_path):
-        """
-        :param dictionary_file_to_save_full_path: file path to save dictionary
-        :return: None
-        """
-        if not dictionary_file_to_save_full_path.lower().endswith(".txt"):
-            raise Exception("Please make sure your file is a .txt file")
-
-        if os.path.isfile(dictionary_file_to_save_full_path):
-            if os.stat(dictionary_file_to_save_full_path).st_size == 0:
-                raise Exception("This file is empty")
-
-        with open(dictionary_file_to_save_full_path, 'w') as outfile:
-            self.highlights_dictionary["date_of_last_highlight"] = str(self.highlights_dictionary["date_of_last_highlight"])
-            json.dump(self.highlights_dictionary, outfile)
-
-    def _get_last_modified_date(self):
-        """
-        :return: the last time the dictionary was modified
-        """
-        return self.highlights_dictionary["date_of_last_highlight"]
-
-    def _get_author_list(self):
-        """
-        :return: the list of authors in the dictionary
-        """
-        author_list = list(self.highlights_dictionary.keys())
-        author_list.remove("date_of_last_highlight")
-        return author_list
-
-    def _get_book_list(self):
-        """
-        :return: all the books from all the authors in the dictionary
-        """
-        all_books = []
-        author_list = self._get_author_list()
-        for author in author_list:
-            all_books.extend((list(self.highlights_dictionary[author].keys())))
-
-        return all_books
+        else:
+            return book_and_author_string[:ind].strip()
 
     def _extract_author_name(self, book_and_author_string):
         """
+        Returns the author name from the book and author line in the Kindle 'My Clippings.txt' file.
+
+        The format is generally 'book title (author last name, author first name)'
+        e.g. Influence (Cialdini PhD, Robert B.)
+
+        Sometimes, the publisher is added so that the format is 'book title (publisher) (author last name, author first name)'
+        Influence (Collins Business Essentials) (Cialdini PhD, Robert B.)
+
+        If the author has no last name, then the name as is is returned
+
         :param book_and_author_string: string that contains the book and the author's name
-        :return: the author's name
+        :return: string, '<first name> <last name>' as presented in the file
         """
         open_bracket = book_and_author_string.rfind("(")
         close_bracket = book_and_author_string.rfind(")")
 
         if open_bracket == -1:
-            return "unknown"
+            name = "unknown_" + str(self.num_unknowns)
+            self.num_unknowns += 1
+            return name
 
-        author_full_name = book_and_author_string[open_bracket+1:close_bracket].split(',')
+        author_full_name = book_and_author_string[open_bracket + 1:close_bracket]
+
+        # Empty string
+        if not author_full_name:
+            name = "unknown_" + str(self.num_unknowns)
+            self.num_unknowns += 1
+            return name
+
+        author_full_name = author_full_name.split(";")[0]  # Get first author
+        author_full_name = author_full_name.split(",")  # Author names are usually written as '<first name>, <last name>'
+
         if len(author_full_name) == 1:
             return author_full_name[0]
         else:
@@ -123,136 +180,128 @@ class Clippings:
             last_name = author_full_name[0].strip()
             return " ".join([first_name, last_name])
 
-    def _extract_date(self, date_line):
+    def get_booklist(self, author=None):
         """
-        :param date_line: the string that contains the date of the highlight in the kindle file
-        :return: date the highlight was made
+        Returns a list of books. If author is specified, returns the books from that author.
+
+        :param author: string, the name of the author
+        :return: list of strings
         """
-        index_pos = len("day, ") + date_line.find('day, ')
-        return datetime.datetime.strptime(date_line[index_pos:], "%d %B %Y %H:%M:%S")
 
-    def _extract_book_title(self, book_and_author_string):
+        if author is None:
+            return list(self.book_clippings.keys())
+
+        if self.library.get(author) is None:
+            raise Exception("{} is not a valid author name.".format(author))
+
+        return list(self.library[author])
+
+    def get_book_clippings(self, book):
         """
-        :param book_and_author_string: string that contains the book and the author's name
-        :return: title of the book
+        Returns all the clippings for a book
+
+        :param book: string, the name of the book
+        :return: array of strings
         """
-        open_bracket = book_and_author_string.rfind("(")
 
-        if open_bracket == -1:
-            return book_and_author_string.strip()
-        else:
-            return book_and_author_string[:open_bracket]
+        if self.library.get(book) is None:
+            raise Exception("{} is not a valid book.".format(book))
 
-    def _test_author_empty(self, author_name):
-        try:
-            self.highlights_dictionary[author_name]
-        except KeyError:
-            self.highlights_dictionary[author_name] = {}
+        return self.book_clippings[book][1]
 
-    def _test_book_empty(self, book_name, author_name):
-        try:
-            self.highlights_dictionary[author_name][book_name]
-        except KeyError:
-            self.highlights_dictionary[author_name][book_name] = []
-
-    def _add_highlights(self, highlights, start_date):
+    def get_book_author(self, book):
         """
-        This function adds the clippings and the associated date to each book.
-        It also updates the KindleDictionary object's attributes
-        :param highlights: The highlights from the kindle file
-        :param start_date: The date from which to start updating the highlights
-        :return: None
+        Returns the author of a book
+
+        :param book: string, the name of the book
+        :return: string, author
         """
-        reset_line = "=========="
-        line_number = 1
-        book_and_author = ""
-        clip = []
-        date = start_date
-        start_index = 0
 
-        date_element_indexes = [index-1 for index, line in enumerate(highlights) if line == ""]
-        for index in date_element_indexes:
-            if self._extract_date(highlights[index]) > date:
-                start_index = index
-                break
+        # (Diamandis, Peter H.;Kotler, Steven)
 
-        highlights = highlights[start_index-1:]
-        for line in highlights:
-            if line == reset_line:
-                line_number = 0
+        if self.library.get(book) is None:
+            raise Exception("{} is not a valid book.".format(book))
 
-                if not clip == []:
-                    book = self._extract_book_title(book_and_author).strip()
-                    author = self._extract_author_name(book_and_author).strip()
-                    self._test_author_empty(author)
-                    self._test_book_empty(book, author)
-                    self.highlights_dictionary[author][book].append(" ".join(clip))
-                    clip = []
+        return self.book_clippings[book][0]
 
-                    if self.highlights_dictionary["date_of_last_highlight"] < date:
-                        self.highlights_dictionary["date_of_last_highlight"] = date
-
-            if line_number == 1:
-                book_and_author = line
-            elif line_number == 2:
-                date = self._extract_date(line)
-            elif line_number >= 4:
-                clip.append(line)
-            else:
-                pass
-
-            line_number += 1
-
-        self.booklist = self._get_book_list()
-        self.authorlist = self._get_author_list()
-        self.last_modified_date = self._get_last_modified_date()
-
-    def __str__(self):
-        return str(self.highlights_dictionary)
-
-    def write_clippings_to_file(self, book_name, file_path=""):
+    def save_json(self, file):
         """
-        This function writes all the clippings in the book specified to a text file with the title
-        <book_name + _clippings>
-        :param book_name: name of the book to search in the dictionary
-        :param file_path: the location where the file will be saved excluding file name
+        Saves the book clippings dict, library dict and last modified data to a json file
+
+        :param file: path to json file
         :return: None
         """
 
-        if file_path == "":
-            directory = os.getcwd()
-            file_name = book_name + "_clippings.txt"
-        elif os.path.isdir(file_path):
-            directory = file_path
-            file_name = file_path + book_name + "_clippings.txt"
-        else:
-            raise Exception("{} is not a valid file path".format(file_path))
+        data = {"book_clippings": self.book_clippings,
+                "library": self.library,
+                "last_modified_date": self.last_modified_date}
 
-        for author in self.authorlist:
-            if book_name in self.highlights_dictionary[author]:
-                file = open(file_name, 'w')
-                for clip in self.highlights_dictionary[author][book_name]:
-                    file.write(clip + '\n\n')
-                file.close()
-                return "Highlights saved to '{0}' with the file name '{1}'".format(directory, file_name)
-        else:
-            return "This book was not found. Please check the spelling."
+        with open(file, 'w') as f:
+            print("Saving data to", file)
+            json.dump(data, f)
 
+    def load_json(self, file):
+        """
+        Loads the book clippings dict, library dict and last modified data from a json file
 
-def extract_highlights(file_name):
-    """
-    This function extracts all the highlights you have made from the text file where the Amazon Kindle book highlights
-     are kept
-    :param file_name: text file with highlight
-    :return: highlights
-    """
-    if not file_name.lower().endswith(".txt"):
-        raise Exception("Please make sure your file is a .txt file")
-    elif os.stat(file_name).st_size == 0:
-        raise Exception("This file is empty")
-    else:
-        file_contents = open(file_name, 'r', encoding="utf-8")
-        highlights = file_contents.readlines()
-        file_contents.close()
-        highlights = list(map(str.strip, highlights))
-        return highlights
+        :param file: path to pickle file
+        :return: None
+        """
+
+        with open(file, 'rb') as f:
+            print("Loading data history from", file)
+            data = json.load(f)
+
+        self.last_modified_date = data["last_modified_date"]
+        self.library = data["library"]
+        self.book_clippings = data["book_clippings"]
+
+    def save_pickle(self, file):
+        """
+        Saves the book clippings dict, library dict and last modified data to a pickle file
+
+        :param file: path to pickle file
+        :return: None
+        """
+
+        data = {"book_clippings": self.book_clippings,
+                "library": self.library,
+                "last_modified_date": self.last_modified_date}
+
+        with open(file, 'wb') as f:
+            print("Saving data to", file)
+            pickle.dump(data, f)
+
+    def load_pickle(self, file):
+        """
+        Loads the book clippings dict, library dict and last modified data from a pickle file
+
+        :param file: path to pickle file
+        :return: None
+        """
+
+        with open(file, 'rb') as f:
+            print("Loading data history from", file)
+            data = pickle.load(f)
+
+        self.last_modified_date = data["last_modified_date"]
+        self.library = data["library"]
+        self.book_clippings = data["book_clippings"]
+
+    def write_to_file(self, book, file):
+        """
+        Writes all the clippings in the book specified to a text file
+
+        :param book: string, name of the book
+        :param file: string, full file path
+        :return: None
+        """
+
+        clippings = self.get_book_clippings(book)
+
+        with open(file, 'w') as f:
+            for line in clippings:
+                f.write(line + "\n")
+
+    def write_to_evernote(self, book):
+        pass
