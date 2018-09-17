@@ -11,13 +11,12 @@ class Clippings:
         the raw text file found on the Amazon Kindle device. It is usually named 'My Clippings.txt'.
 
         Two pieces of information are stored:
-        1) The clippings by book. This is stored in a dictionary with the book as the keyword. Th value is a
-        dictionary containing the following [author, date last updated, clippings], where clippings is an array of
-        strings.
+        1) The clippings by book. This is stored in a dictionary with the book as the keyword. The value is a
+        dictionary containing the following [author, clippings], where clippings is an array of
+        strings. For books where the author information cannot be processed, the author information is stored as
+        'unknown_x', where x is an id that increments with the number of unknown authors.
 
-        2) The books by an author. In a separate dictionary, the author and all associated books are stored. This
-        way the user can ask for all clippings from a given author and the search can be performed quickly.
-
+        2) The books by author. In a separate dictionary, the author and all associated books are stored.
         """
 
         # Dictionary that stores the clippings by book. In addition, author and date last modified are stored per book.
