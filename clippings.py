@@ -3,76 +3,72 @@ import re
 import pickle
 import json
 
-class Clippings:
 
-    def __init__(self):
+class Clippings:
+    def __init__(self) -> None:
         """
-        The clippings objects stores all the notes and highlights found in the clippings_file. The clippings_file is
-        the raw text file found on the Amazon Kindle device. It is usually named 'My Clippings.txt'.
+        The clippings objects stores all the notes and highlights found in
+        the Amazon clippings text file usually named 'My Clippings.txt'.
 
         Two pieces of information are stored:
-        1) The clippings by book. This is stored in a dictionary with the book as the keyword. The value is a
-        dictionary containing the following [author, clippings], where clippings is an array of
-        strings. For books where the author information cannot be processed, the author information is stored as
-        'unknown_x', where x is an id that increments with the number of unknown authors.
+        1) The clippings by book.
+        This is stored in a dictionary with the book as the keyword.
+        The value is a dictionary containing the following [author, clippings],
+        where clippings is an array of strings.
 
-        2) The books by author. In a separate dictionary, the author and all associated books are stored.
+        For books where the author information cannot be processed,
+        the author information is stored as 'unknown_x',
+        where x is an id that increments with the number of unknown authors.
+
+        2) The books by author.
+        In a separate dictionary, the author and all associated books are
+        stored.
         """
-
-        # Dictionary that stores the clippings by book. In addition, author and date last modified are stored per book.
-        # The format is {"book_name": [author_name, clippings], ...}, where clippings is an array of
-        # strings.
         self.book_clippings = {}
-
-        # Dictionary to track authors and their books
         self.library = {}
-
-        # Saves when the last extract was, only taking highlights after that date-time
         self.last_modified_date = datetime.min
-
-        # Unknown authors
         self.num_unknowns = 0
 
-    def load_from_text(self, clippings_file):
+    def load_from_file(self, clippings_filepath: str) -> None:
         """
-        Loads the clippings from the Amazon Kindle 'My Clippings.txt' file. The format of a highlight is shown below.
+        Loads the clippings from the Amazon Kindle 'My Clippings.txt' file.
 
-        ---------------------
-        Example:
-        The Autobiography of Benjamin Franklin (Franklin, Benjamin)
-        - Your Highlight on page 25 | location 498-498 | Added on Tuesday, 16 August 2016 19:45:26
-
-        The breaking into this money of Vernon's was one of the first great errata of my life;
-        ==========
-        ---------------------
-
-        :param clippings_file: The highlights from the kindle file
-        :return: None
+        Works off the assumption that every highlight or note contains
+        5 lines of information:
+            Line 1: book & author
+            Line 2: Page location, date added
+            Line 3: Blank line
+            Line 4: The highlight / note
+            Line 5: Note Break
         """
-
         start_index = 0
-
-        with open(clippings_file, 'r') as f:
-            highlights = f.readlines()
+        with open(clippings_filepath, "r") as f:
+            highlights = [line.strip() for line in f]
 
         num_lines = len(highlights)
         highlight_length = 5
-        # Every highlight contains 5 lines of information
-        # Line 1: book & author
-        # Line 2: Page location, date added
-        # Line 3: Blank line
-        # Line 4: The highlight / note
 
         # Searches for the place to start reading new highlights
-        for line_num in range(1, num_lines, highlight_length):  # The date is every 5 lines
+        for line_num in range(
+            1, num_lines, highlight_length
+        ):  # The date is every 5 lines
 
-            if self._extract_date(highlights[line_num]) > self.last_modified_date:
-                start_index = line_num - 1 # -1 because the start of the highlight information is 1 line before the date
+            if (
+                self._extract_date(highlights[line_num])
+                > self.last_modified_date
+            ):
+                start_index = (
+                    line_num - 1
+                )  # -1 because the start of the highlight information is 1 line before the date
                 break
 
         # max in case this is a new file
-        for line_num in range(max(0, start_index), num_lines, highlight_length):
-            clipping = highlights[line_num + 3].strip()  # +3 because the notes / highlight is 3 lines under the book / author line
+        for line_num in range(
+            max(0, start_index), num_lines, highlight_length
+        ):
+            clipping = highlights[
+                line_num + 3
+            ].strip()  # +3 because the notes / highlight is 3 lines under the book / author line
 
             # Check for blanks
             if clipping == "":
@@ -94,10 +90,11 @@ class Clippings:
             elif book not in self.library[author]:
                 self.library[author].add(book)
 
-
         # Amazon stores every highlight in chronological order so it is ok to take the last highlight's date as the
         # last modified date.
-        self.last_modified_date = self._extract_date(highlights[line_num + 1])  # Takes the date from the last highlight
+        self.last_modified_date = self._extract_date(
+            highlights[line_num + 1]
+        )  # Takes the date from the last highlight
 
     def _extract_date(self, date_line):
         """
@@ -161,7 +158,9 @@ class Clippings:
             self.num_unknowns += 1
             return name
 
-        author_full_name = book_and_author_string[open_bracket + 1:close_bracket]
+        author_full_name = book_and_author_string[
+            open_bracket + 1 : close_bracket
+        ]
 
         # Empty string
         if not author_full_name:
@@ -170,7 +169,9 @@ class Clippings:
             return name
 
         author_full_name = author_full_name.split(";")[0]  # Get first author
-        author_full_name = author_full_name.split(",")  # Author names are usually written as '<first name>, <last name>'
+        author_full_name = author_full_name.split(
+            ","
+        )  # Author names are usually written as '<first name>, <last name>'
 
         if len(author_full_name) == 1:
             return author_full_name[0]
@@ -229,11 +230,13 @@ class Clippings:
         :return: None
         """
 
-        data = {"book_clippings": self.book_clippings,
-                "library": self.library,
-                "last_modified_date": self.last_modified_date}
+        data = {
+            "book_clippings": self.book_clippings,
+            "library": self.library,
+            "last_modified_date": self.last_modified_date,
+        }
 
-        with open(file, 'w') as f:
+        with open(file, "w") as f:
             print("Saving data to", file)
             json.dump(data, f)
 
@@ -245,7 +248,7 @@ class Clippings:
         :return: None
         """
 
-        with open(file, 'rb') as f:
+        with open(file, "rb") as f:
             print("Loading data history from", file)
             data = json.load(f)
 
@@ -261,11 +264,13 @@ class Clippings:
         :return: None
         """
 
-        data = {"book_clippings": self.book_clippings,
-                "library": self.library,
-                "last_modified_date": self.last_modified_date}
+        data = {
+            "book_clippings": self.book_clippings,
+            "library": self.library,
+            "last_modified_date": self.last_modified_date,
+        }
 
-        with open(file, 'wb') as f:
+        with open(file, "wb") as f:
             print("Saving data to", file)
             pickle.dump(data, f)
 
@@ -277,7 +282,7 @@ class Clippings:
         :return: None
         """
 
-        with open(file, 'rb') as f:
+        with open(file, "rb") as f:
             print("Loading data history from", file)
             data = pickle.load(f)
 
@@ -296,7 +301,7 @@ class Clippings:
 
         clippings = self.get_book_clippings(book)
 
-        with open(file, 'w') as f:
+        with open(file, "w") as f:
             for line in clippings:
                 f.write(line + "\n")
 
