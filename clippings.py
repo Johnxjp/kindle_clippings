@@ -3,7 +3,7 @@ from datetime import datetime
 import json
 import pickle
 import re
-from typing import Mapping, Sequence
+from typing import Mapping, Sequence, Tuple, Optional
 
 Clip = namedtuple("Clip", "book_title, author, location, date, text")
 Hash = int
@@ -40,40 +40,67 @@ class NoteKeeper:
             f.readline(1)  # Skip first line
             highlights = [line.strip() for line in f]
 
-        highlight_length = 5
+        n_lines_per_clip = 5
         for line_number, info in enumerate(highlights):
-            if line_number % highlight_length == 0:
-                book = self._extract_book_title(info)
-                author = self._extract_author_name(info)
+            if line_number % n_lines_per_clip == 0:
+                book, author = self._extract_title_and_author(info)
+                if author is None:
+                    author = "unknown"
 
-            elif line_number % highlight_length == 1:
+            elif line_number % n_lines_per_clip == 1:
                 location = self._extract_location_number(info)
                 date = self._extract_date(info)
 
-            elif line_number % highlight_length == 3:
+            elif line_number % n_lines_per_clip == 3:
                 text = info
 
-            elif line_number % highlight_length == 4:
+            elif line_number % n_lines_per_clip == 4:
                 clip = Clip(book, author, location, date, text)
                 clip_hash = hash(clip)
                 self._clippings[clip_hash] = clip
 
-                # TODO: Fix this so it adds a default list. What happens if
-                # author is unknown? Make this compatible with multiple authors
-                self._book_search[book][author] = clip_hash
+                if not self._book_search.get(book, False):
+                    self._book_search[book] = {author: [clip_hash]}
+                elif not self._book_search[book].get(author, False):
+                    self._book_search[book][author] = [clip_hash]
+                else:
+                    self._book_search[book][author].append(clip_hash)
 
-                if author != "unknown":
+                if author is not None:
                     self._author_search[author].append(clip)
+
+    def _extract_title_and_author(
+        self, line: str
+    ) -> Tuple[str, Optional[str]]:
+        """
+        Returns the title and author from the first line
+        of a clip.
+
+        The format is generally 'book title
+        (author last name, author first name)'
+        e.g. Influence (Cialdini PhD, Robert B.)
+
+        Sometimes, the publisher is added so that the format is
+        'book title (publisher) (author last name, author first name)'
+        Influence (Collins Business Essentials) (Cialdini PhD, Robert B.)
+        """
+        ind = line.find("(")
+        if ind == -1:
+            return line.strip(), None
+
+        book = line[:ind].strip()
+        author = self._extract_author_name(line[ind:])
+        return book, author
 
     def _extract_date(self, date_line):
         """
-        Extracts the date from a highlight in the 'My Clippings.txt' file using regular expressions.
+        Extracts the date from a highlight in the 'My Clippings.txt'
+        file using regular expressions.
 
-        Dates are recorded on the second line of a highlight in the following format:
-        '- Your Highlight on page 43 | location 973-974 | Added on Thursday, 28 January 2016 08:33:31'
-
-        :param date_line: the string that contains the date of the highlight in the kindle file
-        :return: datetime object. Min if can't find a match
+        Dates are recorded on the second line of a
+        highlight in the following format:
+        '- Your Highlight on page 43 | location 973-974 |
+        Added on Thursday, 28 January 2016 08:33:31'
         """
         p = re.compile("\d{2}\s\D+\s\d{4}\s\d{2}:\d{2}:\d{2}", re.IGNORECASE)
         match = re.search(p, date_line)
@@ -83,75 +110,47 @@ class NoteKeeper:
         else:
             return datetime.strptime(match.group(0), "%d %B %Y %H:%M:%S")
 
-    def _extract_book_title(self, book_and_author_string):
+    def _extract_author_name(self, line: str) -> Optional[str]:
         """
-        Returns the book title from the book and author line in the Kindle 'My Clippings.txt' file.
+        Returns the authors name extracted as `<first name> <other names>`
 
-        The format is generally 'book title (author last name, author first name)'
-        e.g. Influence (Cialdini PhD, Robert B.)
-
-        Sometimes, the publisher is added so that the format is 'book title (publisher) (author last name, author first name)'
-        Influence (Collins Business Essentials) (Cialdini PhD, Robert B.)
-
-        :param book_and_author_string: string that contains the book and the author's name
-        :return: string, title of the book
+        If there are multiple authors it returns "<author 1> & <author 2> .."
         """
-
-        ind = book_and_author_string.find("(")
-        if ind == -1:
-            return book_and_author_string.strip()
-
-        else:
-            return book_and_author_string[:ind].strip()
-
-    def _extract_author_name(self, book_and_author_string):
-        """
-        Returns the author name from the book and author line in the Kindle 'My Clippings.txt' file.
-
-        The format is generally 'book title (author last name, author first name)'
-        e.g. Influence (Cialdini PhD, Robert B.)
-
-        Sometimes, the publisher is added so that the format is 'book title (publisher) (author last name, author first name)'
-        Influence (Collins Business Essentials) (Cialdini PhD, Robert B.)
-
-        If the author has no last name, then the name as is is returned
-
-        :param book_and_author_string: string that contains the book and the author's name
-        :return: string, '<first name> <last name>' as presented in the file
-        """
-        open_bracket = book_and_author_string.rfind("(")
-        close_bracket = book_and_author_string.rfind(")")
+        open_bracket = line.rfind("(")
+        close_bracket = line.rfind(")")
 
         if open_bracket == -1:
-            name = "unknown_" + str(self.num_unknowns)
-            self.num_unknowns += 1
-            return name
+            return None
 
-        author_full_name = book_and_author_string[
-            open_bracket + 1 : close_bracket
-        ]
+        author = line[open_bracket + 1 : close_bracket]
 
         # Empty string
-        if not author_full_name:
-            name = "unknown_" + str(self.num_unknowns)
-            self.num_unknowns += 1
-            return name
+        if len(author) == 0:
+            return None
 
-        author_full_name = author_full_name.split(";")[0]  # Get first author
-        author_full_name = author_full_name.split(
-            ","
-        )  # Author names are usually written as '<first name>, <last name>'
+        # Handle case with multiple authors
+        # Author names are usually written as '<first name>, <last name>'
+        authors = author.split(";")
+        formatted_names = [self._swap_parts_of_name(name) for name in authors]
+        return " & ".join(formatted_names)
 
-        if len(author_full_name) == 1:
-            return author_full_name[0]
-        else:
-            first_name = author_full_name[1].strip()
-            last_name = author_full_name[0].strip()
-            return " ".join([first_name, last_name])
+    def _swap_parts_of_name(self, name: str) -> str:
+        """
+        Reformats the author name from `<last names>, <first name>`
+        to `<first name> <last name>`
+        """
+        names = name.split(",")
+        if len(names) == 1:
+            return names[0]
+
+        first_name = names[1].strip()
+        last_names = names[0].strip()
+        return f"{first_name} {last_names}"
 
     def get_booklist(self, author=None):
         """
-        Returns a list of books. If author is specified, returns the books from that author.
+        Returns a list of books. If author is specified, returns the books
+        from that author.
 
         :param author: string, the name of the author
         :return: list of strings
@@ -193,7 +192,8 @@ class NoteKeeper:
 
     def save_json(self, file):
         """
-        Saves the book clippings dict, library dict and last modified data to a json file
+        Saves the book clippings dict, library dict and last modified data
+        to a json file
 
         :param file: path to json file
         :return: None
@@ -211,7 +211,8 @@ class NoteKeeper:
 
     def load_json(self, file):
         """
-        Loads the book clippings dict, library dict and last modified data from a json file
+        Loads the book clippings dict, library dict and last modified data
+        from a json file
 
         :param file: path to pickle file
         :return: None
@@ -227,7 +228,8 @@ class NoteKeeper:
 
     def save_pickle(self, file):
         """
-        Saves the book clippings dict, library dict and last modified data to a pickle file
+        Saves the book clippings dict, library dict and last modified data to
+        a pickle file
 
         :param file: path to pickle file
         :return: None
@@ -245,7 +247,8 @@ class NoteKeeper:
 
     def load_pickle(self, file):
         """
-        Loads the book clippings dict, library dict and last modified data from a pickle file
+        Loads the book clippings dict, library dict and last modified data
+        from a pickle file
 
         :param file: path to pickle file
         :return: None
