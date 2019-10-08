@@ -1,33 +1,28 @@
+from collections import namedtuple, defaultdict
 from datetime import datetime
-import re
-import pickle
 import json
+import pickle
+import re
+from typing import Mapping, Sequence
+
+Clip = namedtuple("Clip", "book_title, author, location, date, text")
+Hash = int
 
 
-class Clippings:
+class NoteKeeper:
     def __init__(self) -> None:
         """
         The clippings objects stores all the notes and highlights found in
         the Amazon clippings text file usually named 'My Clippings.txt'.
 
-        Two pieces of information are stored:
-        1) The clippings by book.
-        This is stored in a dictionary with the book as the keyword.
-        The value is a dictionary containing the following [author, clippings],
-        where clippings is an array of strings.
+        Information is stored in a format that allows for quick search by
+        book and by author, where known.
 
-        For books where the author information cannot be processed,
-        the author information is stored as 'unknown_x',
-        where x is an id that increments with the number of unknown authors.
-
-        2) The books by author.
-        In a separate dictionary, the author and all associated books are
-        stored.
+        In addition, we can easily export and read from CSV.
         """
-        self.book_clippings = {}
-        self.library = {}
-        self.last_modified_date = datetime.min
-        self.num_unknowns = 0
+        self._clippings: Mapping[Hash, Clip] = {}
+        self._book_search: Mapping[str, Mapping[str, Sequence[Hash]]] = {}
+        self._author_search: Mapping[str, Sequence[Hash]] = defaultdict(list)
 
     def load_from_file(self, clippings_filepath: str) -> None:
         """
@@ -41,60 +36,34 @@ class Clippings:
             Line 4: The highlight / note
             Line 5: Note Break
         """
-        start_index = 0
-        with open(clippings_filepath, "r") as f:
+        with open(clippings_filepath) as f:
+            f.readline(1)  # Skip first line
             highlights = [line.strip() for line in f]
 
-        num_lines = len(highlights)
         highlight_length = 5
+        for line_number, info in enumerate(highlights):
+            if line_number % highlight_length == 0:
+                book = self._extract_book_title(info)
+                author = self._extract_author_name(info)
 
-        # Searches for the place to start reading new highlights
-        for line_num in range(
-            1, num_lines, highlight_length
-        ):  # The date is every 5 lines
+            elif line_number % highlight_length == 1:
+                location = self._extract_location_number(info)
+                date = self._extract_date(info)
 
-            if (
-                self._extract_date(highlights[line_num])
-                > self.last_modified_date
-            ):
-                start_index = (
-                    line_num - 1
-                )  # -1 because the start of the highlight information is 1 line before the date
-                break
+            elif line_number % highlight_length == 3:
+                text = info
 
-        # max in case this is a new file
-        for line_num in range(
-            max(0, start_index), num_lines, highlight_length
-        ):
-            clipping = highlights[
-                line_num + 3
-            ].strip()  # +3 because the notes / highlight is 3 lines under the book / author line
+            elif line_number % highlight_length == 4:
+                clip = Clip(book, author, location, date, text)
+                clip_hash = hash(clip)
+                self._clippings[clip_hash] = clip
 
-            # Check for blanks
-            if clipping == "":
-                continue
+                # TODO: Fix this so it adds a default list. What happens if
+                # author is unknown? Make this compatible with multiple authors
+                self._book_search[book][author] = clip_hash
 
-            book = self._extract_book_title(highlights[line_num])
-            author = self._extract_author_name(highlights[line_num])
-
-            # Add clipping
-            if self.book_clippings.get(book) is None:
-                self.book_clippings[book] = [author, [clipping]]
-
-            else:
-                self.book_clippings[book][1].append(clipping)
-
-            # Add to library
-            if self.library.get(author) is None:
-                self.library[author] = set([book])
-            elif book not in self.library[author]:
-                self.library[author].add(book)
-
-        # Amazon stores every highlight in chronological order so it is ok to take the last highlight's date as the
-        # last modified date.
-        self.last_modified_date = self._extract_date(
-            highlights[line_num + 1]
-        )  # Takes the date from the last highlight
+                if author != "unknown":
+                    self._author_search[author].append(clip)
 
     def _extract_date(self, date_line):
         """
