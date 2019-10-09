@@ -39,44 +39,65 @@ class NoteKeeper:
             Line 5: Note Break
         """
         with open(clippings_filepath) as f:
-            f.readline(1)  # Skip first line
+            f.readline()  # Skip first line
             highlights = [line.strip().lower() for line in f]
 
-        n_lines_per_clip = 5
-        for line_number, info in enumerate(highlights):
-            if line_number % n_lines_per_clip == 0:
-                book = self._extract_book_title(info)
-                author = self._extract_author(info)
-                if author is None:
-                    author = "unknown"
-
-            elif line_number % n_lines_per_clip == 1:
-                start_location, end_location = self._extract_location(info)
-                date = self._extract_date(info)
-
-            elif line_number % n_lines_per_clip == 3:
-                text = info
-
-            elif line_number % n_lines_per_clip == 4:
-                clip = Clip(
-                    book, author, start_location, end_location, date, text
-                )
-
-                # Warning: hash value is truncated to bit value of machine
-                clip_hash = hash(clip)
-                self._clippings[clip_hash] = clip
-
-                if not self._book_search.get(book, False):
-                    self._book_search[book] = {author: [clip_hash]}
-                elif not self._book_search[book].get(author, False):
-                    self._book_search[book][author] = [clip_hash]
-                else:
-                    self._book_search[book][author].append(clip_hash)
-
-                if author is not None:
-                    self._author_search[author].append(clip)
+        n_lines_per_highlight = 5
+        for line_number in range(0, len(highlights), n_lines_per_highlight):
+            highlight_block = highlights[
+                line_number : line_number + n_lines_per_highlight
+            ]
+            clip = self._extract_clip(highlight_block)
+            # Warning: hash value is truncated to bit value of machine
+            clip_hash = hash(clip)
+            self._clippings[clip_hash] = clip
+            self.update_book_search(clip.book_title, clip.author, clip_hash)
+            self.update_author_search(clip.author, clip_hash)
 
         print(f"Extracted {len(self._clippings)} from file.")
+
+    # TURN THOSE CLIPS INTO SETS
+    def update_book_search(
+        self, book: str, author: str, clip_hash: Hash
+    ) -> None:
+        """
+        Updates the hash map containing clips belonging to books
+        """
+        if not self._book_search.get(book, False):
+            self._book_search[book] = {author: [clip_hash]}
+        elif not self._book_search[book].get(author, False):
+            self._book_search[book][author] = [clip_hash]
+        else:
+            if clip_hash not in self._book_search[book][author]:
+                self._book_search[book][author].append(clip_hash)
+
+    def update_author_search(self, author: str, clip_hash: Hash) -> None:
+        """
+        Updates the hash map containing clips by author
+        """
+        if author is not None and clip_hash not in self._author_search[author]:
+            self._author_search[author].append(clip_hash)
+
+    def _extract_clip(self, highlight_block: Sequence[str]) -> Clip:
+        """
+        Takes a highlight block and returns a Clip object. An example of a
+        highlight block is
+        """
+        book_author_line = highlight_block[0]
+        location_date_line = highlight_block[1]
+        text = highlight_block[3]
+
+        book = self._extract_book_title(book_author_line)
+        author = self._extract_author(book_author_line)
+        if author is None:
+            author = "unknown"
+
+        start_location, end_location = self._extract_location(
+            location_date_line
+        )
+        date = self._extract_date(location_date_line)
+
+        return Clip(book, author, start_location, end_location, date, text)
 
     @staticmethod
     def _extract_book_title(line: str) -> str:
