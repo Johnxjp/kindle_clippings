@@ -24,7 +24,7 @@ class NoteKeeper:
         """
         self._clippings: Mapping[Hash, Clip] = {}
         self._book_search: Mapping[str, Mapping[str, Sequence[Hash]]] = {}
-        self._author_search: Mapping[str, Sequence[Hash]] = defaultdict(list)
+        self._author_search: Mapping[str, Sequence[Hash]] = defaultdict(set)
 
     def load_from_file(self, clippings_filepath: str) -> None:
         """
@@ -39,8 +39,11 @@ class NoteKeeper:
             Line 5: Note Break
         """
         with open(clippings_filepath) as f:
-            f.readline()  # Skip first line
             highlights = [line.strip().lower() for line in f]
+            if "=" in highlights[0]:
+                # Skip first line if line break as the code was built
+                # on file versions without this.
+                highlights = highlights[1:]
 
         n_lines_per_highlight = 5
         for line_number in range(0, len(highlights), n_lines_per_highlight):
@@ -56,27 +59,33 @@ class NoteKeeper:
 
         print(f"Extracted {len(self._clippings)} from file.")
 
-    # TURN THOSE CLIPS INTO SETS
     def update_book_search(
-        self, book: str, author: str, clip_hash: Hash
+        self, book: str, author: Optional[str], clip_hash: Hash
     ) -> None:
         """
         Updates the hash map containing clips belonging to books
         """
-        if not self._book_search.get(book, False):
-            self._book_search[book] = {author: [clip_hash]}
-        elif not self._book_search[book].get(author, False):
-            self._book_search[book][author] = [clip_hash]
+        author = author if author is not None else "unknown"
+        if book not in self._book_search:
+            self._book_search[book] = {author: set([clip_hash])}
+        elif author not in self._book_search[book]:
+            self._book_search[book][author] = set([clip_hash])
         else:
-            if clip_hash not in self._book_search[book][author]:
-                self._book_search[book][author].append(clip_hash)
+            self._book_search[book][author].add(clip_hash)
 
-    def update_author_search(self, author: str, clip_hash: Hash) -> None:
+    def update_author_search(
+        self, author: Optional[str], clip_hash: Hash
+    ) -> None:
         """
         Updates the hash map containing clips by author
         """
-        if author is not None and clip_hash not in self._author_search[author]:
-            self._author_search[author].append(clip_hash)
+        if author is None:
+            return
+
+        if author in self._author_search:
+            self._author_search[author].add(clip_hash)
+        else:
+            self._author_search[author] = set([clip_hash])
 
     def _extract_clip(self, highlight_block: Sequence[str]) -> Clip:
         """
@@ -89,9 +98,6 @@ class NoteKeeper:
 
         book = self._extract_book_title(book_author_line)
         author = self._extract_author(book_author_line)
-        if author is None:
-            author = "unknown"
-
         start_location, end_location = self._extract_location(
             location_date_line
         )

@@ -1,6 +1,11 @@
 import pytest
 from datetime import datetime
-from clippings import Clip, NoteKeeper, Hash
+from clippings import Clip, NoteKeeper
+
+
+@pytest.fixture
+def notekeeper():
+    return NoteKeeper()
 
 
 @pytest.mark.parametrize(
@@ -115,3 +120,78 @@ def test_extract_location(input, expected_start, expected_end):
 def test_extract_date(input, expected_date):
     date = NoteKeeper._extract_date(input)
     assert date == expected_date
+
+
+@pytest.mark.parametrize(
+    "input, expected",
+    [
+        (
+            [
+                "Autobiography of Lincoln (lincoln, abraham)",
+                "- Your Highlight location 1085-1086 | Added on Monday, 29 May 2016 10:00:31",
+                "",
+                "some text",
+                "=========",
+            ],
+            Clip(
+                "Autobiography of Lincoln",
+                "abraham lincoln",
+                1085,
+                1086,
+                datetime(2016, 5, 29, 10, 0, 31),
+                "some text",
+            ),
+        )
+    ],
+)
+def test_extract_clip(notekeeper, input, expected):
+    clip = notekeeper._extract_clip(input)
+    assert clip == expected
+
+
+@pytest.mark.parametrize(
+    "input, expected",
+    [
+        (
+            [
+                ("author1", 123),
+                ("author2", 123),
+                (None, 123),
+                ("author1", 123),
+                ("author1", 432),
+            ],
+            {"author1": {123, 432}, "author2": {123}},
+        )
+    ],
+)
+def test_update_author_map(notekeeper, input, expected):
+    for author, clip_hash in input:
+        notekeeper.update_author_search(author, clip_hash)
+
+    assert notekeeper._author_search == expected
+
+
+@pytest.mark.parametrize(
+    "input, expected",
+    [
+        (
+            [
+                ("book1", "author1", 123),
+                ("book1", "author2", 123),
+                ("book2", None, 123),
+                ("book3", "author1", 123),
+                ("book2", "author1", 432),
+            ],
+            {
+                "book1": {"author1": {123}, "author2": {123}},
+                "book2": {"unknown": {123}, "author1": {432}},
+                "book3": {"author1": {123}},
+            },
+        )
+    ],
+)
+def test_update_book_map(notekeeper, input, expected):
+    for book, author, clip_hash in input:
+        notekeeper.update_book_search(book, author, clip_hash)
+
+    assert notekeeper._book_search == expected
