@@ -5,7 +5,9 @@ import pickle
 import re
 from typing import Mapping, Sequence, Tuple, Optional
 
-Clip = namedtuple("Clip", "book_title, author, location, date, text")
+Clip = namedtuple(
+    "Clip", "book_title, author, start_location, end_location, date, text"
+)
 Hash = int
 
 
@@ -43,19 +45,22 @@ class NoteKeeper:
         n_lines_per_clip = 5
         for line_number, info in enumerate(highlights):
             if line_number % n_lines_per_clip == 0:
-                book, author = self._extract_title_and_author(info)
+                book = self._extract_book_title(info)
+                author = self._extract_author(info)
                 if author is None:
                     author = "unknown"
 
             elif line_number % n_lines_per_clip == 1:
-                location = self._extract_location_number(info)
+                start_location, end_location = self._extract_location(info)
                 date = self._extract_date(info)
 
             elif line_number % n_lines_per_clip == 3:
                 text = info
 
             elif line_number % n_lines_per_clip == 4:
-                clip = Clip(book, author, location, date, text)
+                clip = Clip(
+                    book, author, start_location, end_location, date, text
+                )
                 clip_hash = hash(clip)
                 self._clippings[clip_hash] = clip
 
@@ -69,68 +74,46 @@ class NoteKeeper:
                 if author is not None:
                     self._author_search[author].append(clip)
 
-    def _extract_title_and_author(
-        self, line: str
-    ) -> Tuple[str, Optional[str]]:
+    def _extract_book_title(self, line: str) -> str:
         """
-        Returns the title and author from the first line
+        Returns the title from the first line
         of a clip.
 
-        The format is generally 'book title
-        (author last name, author first name)'
+        The format is often 'book title (author last name, author first name)'
         e.g. Influence (Cialdini PhD, Robert B.)
 
-        Sometimes, the publisher is added so that the format is
-        'book title (publisher) (author last name, author first name)'
+        Sometimes, the publisher is also added in brackets between the
+        book title and the author names e.g.
         Influence (Collins Business Essentials) (Cialdini PhD, Robert B.)
+        Publisher information is ignored.
         """
         ind = line.find("(")
         if ind == -1:
-            return line.strip(), None
+            return line.strip()
 
-        book = line[:ind].strip()
-        author = self._extract_author_name(line[ind:])
-        return book, author
+        title = line[:ind].strip()
+        return title
 
-    def _extract_date(self, date_line):
+    def _extract_author(self, line: str) -> Optional[str]:
         """
-        Extracts the date from a highlight in the 'My Clippings.txt'
-        file using regular expressions.
+        Returns the author name extracted as `<first name> <other names>`
 
-        Dates are recorded on the second line of a
-        highlight in the following format:
-        '- Your Highlight on page 43 | location 973-974 |
-        Added on Thursday, 28 January 2016 08:33:31'
-        """
-        p = re.compile("\d{2}\s\D+\s\d{4}\s\d{2}:\d{2}:\d{2}", re.IGNORECASE)
-        match = re.search(p, date_line)
-
-        if match is None:
-            return datetime.min
-        else:
-            return datetime.strptime(match.group(0), "%d %B %Y %H:%M:%S")
-
-    def _extract_author_name(self, line: str) -> Optional[str]:
-        """
-        Returns the authors name extracted as `<first name> <other names>`
-
-        If there are multiple authors it returns "<author 1> & <author 2> .."
+        If there are multiple author it returns "<author 1> & <author 2> .."
         """
         open_bracket = line.rfind("(")
-        close_bracket = line.rfind(")")
-
         if open_bracket == -1:
             return None
 
-        author = line[open_bracket + 1 : close_bracket]
+        close_bracket = line.rfind(")")
+        names = line[open_bracket + 1 : close_bracket]
 
         # Empty string
-        if len(author) == 0:
+        if len(names) == 0:
             return None
 
-        # Handle case with multiple authors
+        # Handle case with multiple author
         # Author names are usually written as '<first name>, <last name>'
-        authors = author.split(";")
+        authors = names.split(";")
         formatted_names = [self._swap_parts_of_name(name) for name in authors]
         return " & ".join(formatted_names)
 
@@ -139,13 +122,49 @@ class NoteKeeper:
         Reformats the author name from `<last names>, <first name>`
         to `<first name> <last name>`
         """
-        names = name.split(",")
-        if len(names) == 1:
-            return names[0]
+        name_parts = name.split(",")
+        if len(name_parts) == 1:
+            return name_parts[0]
 
-        first_name = names[1].strip()
-        last_names = names[0].strip()
+        first_name = name_parts[1].strip()
+        last_names = name_parts[0].strip()
         return f"{first_name} {last_names}"
+
+    def _extract_location(info: str) -> Tuple[int, int]:
+        """
+        Extracts the location info from a highlight. Page is not taken as
+        location is the standardised digital position.
+
+        Locations are recorded on the second line of a
+        highlight in the following format:
+        '- Your Highlight on page 43 | location 973-974 |
+        Added on Thursday, 28 January 2016 08:33:31'
+        """
+
+        # TODO: What if the location is only on one page?
+        pattern = re.compile("location (\d+)-(\d+)", re.IGNORECASE)
+        match = re.search(pattern, info)
+        if match is None:
+            return 0, 0
+
+        return match.groups()
+
+    def _extract_date(self, info: str) -> datetime:
+        """
+        Extracts the date from a highlight.
+
+        Dates are recorded on the second line of a
+        highlight in the following format:
+        '- Your Highlight on page 43 | location 973-974 |
+        Added on Thursday, 28 January 2016 08:33:31'
+        """
+        pattern = re.compile(
+            "\d{2}\s\w+\s\d{4}\s\d{2}:\d{2}:\d{2}", re.IGNORECASE
+        )
+        match = re.search(pattern, info)
+        if match is None:
+            return datetime.min
+        return datetime.strptime(match.group(0), "%d %B %Y %H:%M:%S")
 
     def get_booklist(self, author=None):
         """
