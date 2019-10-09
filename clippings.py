@@ -40,7 +40,7 @@ class NoteKeeper:
         """
         with open(clippings_filepath) as f:
             f.readline(1)  # Skip first line
-            highlights = [line.strip() for line in f]
+            highlights = [line.strip().lower() for line in f]
 
         n_lines_per_clip = 5
         for line_number, info in enumerate(highlights):
@@ -61,6 +61,8 @@ class NoteKeeper:
                 clip = Clip(
                     book, author, start_location, end_location, date, text
                 )
+
+                # Warning: hash value is truncated to bit value of machine
                 clip_hash = hash(clip)
                 self._clippings[clip_hash] = clip
 
@@ -74,7 +76,10 @@ class NoteKeeper:
                 if author is not None:
                     self._author_search[author].append(clip)
 
-    def _extract_book_title(self, line: str) -> str:
+        print(f"Extracted {len(self._clippings)} from file.")
+
+    @staticmethod
+    def _extract_book_title(line: str) -> str:
         """
         Returns the title from the first line
         of a clip.
@@ -94,7 +99,8 @@ class NoteKeeper:
         title = line[:ind].strip()
         return title
 
-    def _extract_author(self, line: str) -> Optional[str]:
+    @staticmethod
+    def _extract_author(line: str) -> Optional[str]:
         """
         Returns the author name extracted as `<first name> <other names>`
 
@@ -114,22 +120,30 @@ class NoteKeeper:
         # Handle case with multiple author
         # Author names are usually written as '<first name>, <last name>'
         authors = names.split(";")
-        formatted_names = [self._swap_parts_of_name(name) for name in authors]
+        formatted_names = [
+            NoteKeeper._swap_parts_of_name(name) for name in authors
+        ]
         return " & ".join(formatted_names)
 
-    def _swap_parts_of_name(self, name: str) -> str:
+    @staticmethod
+    def _swap_parts_of_name(name: str) -> str:
         """
         Reformats the author name from `<last names>, <first name>`
         to `<first name> <last name>`
+
+        Note: this will not handle cases like
+        ("lincoln, abraham dr,", "dr, abraham lincoln") and
+        ("Agriculture, urban and food hall"),
         """
         name_parts = name.split(",")
         if len(name_parts) == 1:
-            return name_parts[0]
+            return name_parts[0].strip()
 
         first_name = name_parts[1].strip()
         last_names = name_parts[0].strip()
         return f"{first_name} {last_names}"
 
+    @staticmethod
     def _extract_location(info: str) -> Tuple[int, int]:
         """
         Extracts the location info from a highlight. Page is not taken as
@@ -142,14 +156,21 @@ class NoteKeeper:
         """
 
         # TODO: What if the location is only on one page?
-        pattern = re.compile("location (\d+)-(\d+)", re.IGNORECASE)
+        pattern = re.compile(r"location (\d+)(-\d+)?", re.IGNORECASE)
         match = re.search(pattern, info)
         if match is None:
             return 0, 0
 
-        return match.groups()
+        print(match.groups())
+        start, end = match.groups()  # matches are strings
+        if end is None:
+            return int(start), int(start)
 
-    def _extract_date(self, info: str) -> datetime:
+        # Index for end is 1: because the second group captures the dash
+        return int(start), int(end[1:])
+
+    @staticmethod
+    def _extract_date(info: str) -> datetime:
         """
         Extracts the date from a highlight.
 
@@ -159,7 +180,7 @@ class NoteKeeper:
         Added on Thursday, 28 January 2016 08:33:31'
         """
         pattern = re.compile(
-            "\d{2}\s\w+\s\d{4}\s\d{2}:\d{2}:\d{2}", re.IGNORECASE
+            r"\d{2}\s\w+\s\d{4}\s\d{2}:\d{2}:\d{2}", re.IGNORECASE
         )
         match = re.search(pattern, info)
         if match is None:
