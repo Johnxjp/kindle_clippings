@@ -1,13 +1,11 @@
-from collections import namedtuple, defaultdict
+from collections import defaultdict
 from datetime import datetime
-import json
-import pickle
+from functools import reduce
 import re
 from typing import Mapping, Sequence, Tuple, Optional
 
-Clip = namedtuple(
-    "Clip", "book_title, author, start_location, end_location, date, text"
-)
+from clips import Clip, ClipList
+
 Hash = int
 
 
@@ -23,10 +21,10 @@ class NoteKeeper:
         In addition, we can easily export and read from CSV.
         """
         self._clippings: Mapping[Hash, Clip] = {}
-        self._book_search: Mapping[str, Mapping[str, Sequence[Hash]]] = {}
-        self._author_search: Mapping[str, Sequence[Hash]] = defaultdict(list)
+        self._bookclip_map: Mapping[str, Sequence[Hash]] = defaultdict(set)
+        self._authorclip_map: Mapping[str, Sequence[Hash]] = defaultdict(set)
 
-    def load_from_file(self, clippings_filepath: str) -> None:
+    def update_from_file(self, clippings_filepath: str) -> None:
         """
         Loads the clippings from the Amazon Kindle 'My Clippings.txt' file.
 
@@ -39,44 +37,40 @@ class NoteKeeper:
             Line 5: Note Break
         """
         with open(clippings_filepath) as f:
-            f.readline()  # Skip first line
             highlights = [line.strip().lower() for line in f]
 
+        self.update_from_list(highlights)
+
+    def update_from_list(self, raw_clips: Sequence[str]) -> None:
+        """
+        Loads the clips from a list of the raw clippings taken from the
+        kindle file
+        """
         n_lines_per_highlight = 5
-        for line_number in range(0, len(highlights), n_lines_per_highlight):
-            highlight_block = highlights[
+        for line_number in range(0, len(raw_clips), n_lines_per_highlight):
+            highlight_block = raw_clips[
                 line_number : line_number + n_lines_per_highlight
             ]
             clip = self._extract_clip(highlight_block)
             # Warning: hash value is truncated to bit value of machine
+            # This may result in different behaviour on different machines
             clip_hash = hash(clip)
             self._clippings[clip_hash] = clip
-            self.update_book_search(clip.book_title, clip.author, clip_hash)
+            self.update_book_search(clip.book, clip_hash)
             self.update_author_search(clip.author, clip_hash)
 
-        print(f"Extracted {len(self._clippings)} from file.")
-
-    # TURN THOSE CLIPS INTO SETS
-    def update_book_search(
-        self, book: str, author: str, clip_hash: Hash
-    ) -> None:
+    def update_book_search(self, book: str, clip_hash: Hash) -> None:
         """
         Updates the hash map containing clips belonging to books
         """
-        if not self._book_search.get(book, False):
-            self._book_search[book] = {author: [clip_hash]}
-        elif not self._book_search[book].get(author, False):
-            self._book_search[book][author] = [clip_hash]
-        else:
-            if clip_hash not in self._book_search[book][author]:
-                self._book_search[book][author].append(clip_hash)
+        self._bookclip_map[book].add(clip_hash)
 
     def update_author_search(self, author: str, clip_hash: Hash) -> None:
         """
         Updates the hash map containing clips by author
         """
-        if author is not None and clip_hash not in self._author_search[author]:
-            self._author_search[author].append(clip_hash)
+        if author is not None:
+            self._authorclip_map[author].add(clip_hash)
 
     def _extract_clip(self, highlight_block: Sequence[str]) -> Clip:
         """
@@ -182,7 +176,6 @@ class NoteKeeper:
         if match is None:
             return 0, 0
 
-        print(match.groups())
         start, end = match.groups()  # matches are strings
         if end is None:
             return int(start), int(start)
@@ -208,135 +201,53 @@ class NoteKeeper:
             return datetime.min
         return datetime.strptime(match.group(0), "%d %B %Y %H:%M:%S")
 
-    def get_booklist(self, author=None):
+    def _get_book_clippings(
+        self, book: str, author: Optional[str] = None
+    ) -> ClipList:
         """
-        Returns a list of books. If author is specified, returns the books
-        from that author.
-
-        :param author: string, the name of the author
-        :return: list of strings
+        Returns all the clippings for a book. Optionally filter by author
+        too. This is to resolve the case where there may be a book with the
+        same title by multiple authors.
         """
+        clip_hashes = {}
+        try:
+            clip_hashes = self._bookclip_map[book]
+        except KeyError:
+            print(f"{book!r} does not exist. Check spelling.")
 
-        if author is None:
-            return list(self.book_clippings.keys())
+        if author is not None:
+            try:
+                clip_hashes.intersection(self._authorclip_map[author])
+            except KeyError:
+                print(f"{author!r} does not exist. Check spelling.")
 
-        if self.library.get(author) is None:
-            raise Exception("{} is not a valid author name.".format(author))
+        clips = [self._clippings[h] for h in clip_hashes]
+        return ClipList(clips)
 
-        return list(self.library[author])
-
-    def get_book_clippings(self, book):
+    def to_csv(self, file: str, book: Optional[str] = None, sep="\t") -> None:
         """
-        Returns all the clippings for a book
+        Saves all clippings to a csv. By default these are sorted
+        chronologically.
 
-        :param book: string, the name of the book
-        :return: array of strings
-        """
+        If book is specified then all clippings for a book are taken
 
-        if self.book_clippings.get(book) is None:
-            raise Exception("{} is not a valid book.".format(book))
-
-        return self.book_clippings[book][1]
-
-    def get_book_author(self, book):
-        """
-        Returns the author of a book
-
-        :param book: string, the name of the book
-        :return: string, author
+        Separator is tab by default.
         """
 
-        if self.library.get(book) is None:
-            raise Exception("{} is not a valid book.".format(book))
-
-        return self.book_clippings[book][0]
-
-    def save_json(self, file):
-        """
-        Saves the book clippings dict, library dict and last modified data
-        to a json file
-
-        :param file: path to json file
-        :return: None
-        """
-
-        data = {
-            "book_clippings": self.book_clippings,
-            "library": self.library,
-            "last_modified_date": self.last_modified_date,
-        }
-
+        clippings = self.get_clippings(book)
+        clippings.sortby(attribute="date")
         with open(file, "w") as f:
-            print("Saving data to", file)
-            json.dump(data, f)
+            f.write(sep.join(Clip._fields) + "\n")  # Header
+            for clip in clippings:
+                f.write(sep.join(clip) + "\n")
 
-    def load_json(self, file):
+    def get_clippings(
+        self, book: Optional[str] = None, author: Optional[str] = None
+    ) -> ClipList:
         """
-        Loads the book clippings dict, library dict and last modified data
-        from a json file
-
-        :param file: path to pickle file
-        :return: None
+        Return a list of clippings. If book is provided get the list by
+        book.
         """
-
-        with open(file, "rb") as f:
-            print("Loading data history from", file)
-            data = json.load(f)
-
-        self.last_modified_date = data["last_modified_date"]
-        self.library = data["library"]
-        self.book_clippings = data["book_clippings"]
-
-    def save_pickle(self, file):
-        """
-        Saves the book clippings dict, library dict and last modified data to
-        a pickle file
-
-        :param file: path to pickle file
-        :return: None
-        """
-
-        data = {
-            "book_clippings": self.book_clippings,
-            "library": self.library,
-            "last_modified_date": self.last_modified_date,
-        }
-
-        with open(file, "wb") as f:
-            print("Saving data to", file)
-            pickle.dump(data, f)
-
-    def load_pickle(self, file):
-        """
-        Loads the book clippings dict, library dict and last modified data
-        from a pickle file
-
-        :param file: path to pickle file
-        :return: None
-        """
-
-        with open(file, "rb") as f:
-            print("Loading data history from", file)
-            data = pickle.load(f)
-
-        self.last_modified_date = data["last_modified_date"]
-        self.library = data["library"]
-        self.book_clippings = data["book_clippings"]
-
-    def write_to_file(self, book, file):
-        """
-        Writes all the clippings in the book specified to a text file
-
-        :param book: string, name of the book
-        :param file: string, full file path
-        :return: None
-        """
-
-        clippings = self.get_book_clippings(book)
-
-        with open(file, "w") as f:
-            for line in clippings:
-                f.write(line + "\n")
-
-    def write_to_evernote(self, book):
-        pass
+        if book is None and author is None:
+            return list(self._clippings.values())
+        return self._get_book_clippings(book, author)

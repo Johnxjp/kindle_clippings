@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from clippings import Clip, NoteKeeper, Hash
+from notekeeper import NoteKeeper
 
 
 @pytest.mark.parametrize(
