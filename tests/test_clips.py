@@ -1,24 +1,20 @@
 import random
-import string
+
+from faker import Faker
 
 import pytest
-import datetime
-from datetime import datetime as dt
 from clips import Clip, ClipList
 
-
-def random_string(n_chars) -> str:
-    letters = string.ascii_letters
-    return "".join([random.choice(letters) for _ in range(n_chars)])
+DATA_CREATOR = Faker()
 
 
 def random_data() -> Clip:
-    book = random_string(random.randint(0, 10))
-    author = random_string(random.randint(0, 10))
-    start_location = random.randint(0, 1000)
-    end_location = random.randint(0, 1000)
-    date = dt.min + datetime.timedelta(days=random.randint(0, 1000))
-    text = random_string(random.randint(0, 10))
+    book = DATA_CREATOR.sentence(nb_words=2)
+    author = DATA_CREATOR.name()
+    start_location = DATA_CREATOR.random_number()
+    end_location = DATA_CREATOR.random_number()
+    date = DATA_CREATOR.date_object()
+    text = DATA_CREATOR.text()
     return Clip(book, author, start_location, end_location, date, text)
 
 
