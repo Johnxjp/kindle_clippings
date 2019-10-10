@@ -244,92 +244,20 @@ class NoteKeeper:
 
         return self.book_clippings[book][1]
 
-    def get_book_author(self, book):
+    def get_book_author(self, book: str) -> Sequence[str]:
         """
         Returns the author of a book
 
         :param book: string, the name of the book
         :return: string, author
         """
+        try:
+            return list(self._book_search[book].keys())
+        except KeyError:
+            print(f"{book!r} is not a valid book title")
+            return []
 
-        if self.library.get(book) is None:
-            raise Exception("{} is not a valid book.".format(book))
-
-        return self.book_clippings[book][0]
-
-    def save_json(self, file):
-        """
-        Saves the book clippings dict, library dict and last modified data
-        to a json file
-
-        :param file: path to json file
-        :return: None
-        """
-
-        data = {
-            "book_clippings": self.book_clippings,
-            "library": self.library,
-            "last_modified_date": self.last_modified_date,
-        }
-
-        with open(file, "w") as f:
-            print("Saving data to", file)
-            json.dump(data, f)
-
-    def load_json(self, file):
-        """
-        Loads the book clippings dict, library dict and last modified data
-        from a json file
-
-        :param file: path to pickle file
-        :return: None
-        """
-
-        with open(file, "rb") as f:
-            print("Loading data history from", file)
-            data = json.load(f)
-
-        self.last_modified_date = data["last_modified_date"]
-        self.library = data["library"]
-        self.book_clippings = data["book_clippings"]
-
-    def save_pickle(self, file):
-        """
-        Saves the book clippings dict, library dict and last modified data to
-        a pickle file
-
-        :param file: path to pickle file
-        :return: None
-        """
-
-        data = {
-            "book_clippings": self.book_clippings,
-            "library": self.library,
-            "last_modified_date": self.last_modified_date,
-        }
-
-        with open(file, "wb") as f:
-            print("Saving data to", file)
-            pickle.dump(data, f)
-
-    def load_pickle(self, file):
-        """
-        Loads the book clippings dict, library dict and last modified data
-        from a pickle file
-
-        :param file: path to pickle file
-        :return: None
-        """
-
-        with open(file, "rb") as f:
-            print("Loading data history from", file)
-            data = pickle.load(f)
-
-        self.last_modified_date = data["last_modified_date"]
-        self.library = data["library"]
-        self.book_clippings = data["book_clippings"]
-
-    def write_to_file(self, book, file):
+    def to_csv(self, file: str, book: Optional[str] = None):
         """
         Writes all the clippings in the book specified to a text file
 
