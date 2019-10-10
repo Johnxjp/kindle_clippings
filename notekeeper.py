@@ -36,7 +36,7 @@ class NoteKeeper:
         """
         with open(clippings_filepath) as f:
             highlights = [line.strip().lower() for line in f]
-            if "=" in highlights[0]:
+            if highlights[0] == "==========":
                 # Skip first line if line break as the code was built
                 # on file versions without this.
                 highlights = highlights[1:]
@@ -65,7 +65,8 @@ class NoteKeeper:
         """
         self._bookclip_map[book].add(clip_hash)
 
-    def _extract_clip(self, highlight_block: Sequence[str]) -> Clip:
+    @staticmethod
+    def _extract_clip(highlight_block: Sequence[str]) -> Clip:
         """
         Takes a highlight block and returns a Clip object. An example of a
         highlight block is
@@ -74,12 +75,12 @@ class NoteKeeper:
         location_date_line = highlight_block[1]
         text = highlight_block[3]
 
-        book = self._extract_book_title(book_author_line)
-        author = self._extract_author(book_author_line)
-        start_location, end_location = self._extract_location(
+        book = NoteKeeper._extract_book_title(book_author_line)
+        author = NoteKeeper._extract_author(book_author_line)
+        start_location, end_location = NoteKeeper._extract_location(
             location_date_line
         )
-        date = self._extract_date(location_date_line)
+        date = NoteKeeper._extract_date(location_date_line)
 
         return Clip(book, author, start_location, end_location, date, text)
 
@@ -208,10 +209,12 @@ class NoteKeeper:
         book.
         """
         if book is None:
-            return list(self._clippings.values())
+            return ClipList(self._clippings.values())
         return self._get_book_clippings(book)
 
-    def to_csv(self, file: str, book: Optional[str] = None, sep="\t") -> None:
+    def export_csv(
+        self, file: str, book: Optional[str] = None, sep="\t"
+    ) -> None:
         """
         Saves all clippings to a csv. By default these are sorted
         chronologically.
@@ -225,4 +228,4 @@ class NoteKeeper:
         with open(file, "w") as f:
             f.write(sep.join(Clip._fields) + "\n")  # Header
             for clip in clippings:
-                f.write(sep.join(clip) + "\n")
+                f.write(sep.join(map(repr, clip)) + "\n")
