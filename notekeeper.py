@@ -1,6 +1,5 @@
 from collections import defaultdict
 from datetime import datetime
-from functools import reduce
 import re
 from typing import Mapping, Sequence, Tuple, Optional
 
@@ -22,7 +21,6 @@ class NoteKeeper:
         """
         self._clippings: Mapping[Hash, Clip] = {}
         self._bookclip_map: Mapping[str, Sequence[Hash]] = defaultdict(set)
-        self._authorclip_map: Mapping[str, Sequence[Hash]] = defaultdict(set)
 
     def update_from_file(self, clippings_filepath: str) -> None:
         """
@@ -38,7 +36,6 @@ class NoteKeeper:
         """
         with open(clippings_filepath) as f:
             highlights = [line.strip().lower() for line in f]
-
         self.update_from_list(highlights)
 
     def update_from_list(self, raw_clips: Sequence[str]) -> None:
@@ -57,20 +54,12 @@ class NoteKeeper:
             clip_hash = hash(clip)
             self._clippings[clip_hash] = clip
             self.update_book_search(clip.book, clip_hash)
-            self.update_author_search(clip.author, clip_hash)
 
     def update_book_search(self, book: str, clip_hash: Hash) -> None:
         """
         Updates the hash map containing clips belonging to books
         """
         self._bookclip_map[book].add(clip_hash)
-
-    def update_author_search(self, author: str, clip_hash: Hash) -> None:
-        """
-        Updates the hash map containing clips by author
-        """
-        if author is not None:
-            self._authorclip_map[author].add(clip_hash)
 
     def _extract_clip(self, highlight_block: Sequence[str]) -> Clip:
         """
@@ -169,8 +158,6 @@ class NoteKeeper:
         '- Your Highlight on page 43 | location 973-974 |
         Added on Thursday, 28 January 2016 08:33:31'
         """
-
-        # TODO: What if the location is only on one page?
         pattern = re.compile(r"location (\d+)(-\d+)?", re.IGNORECASE)
         match = re.search(pattern, info)
         if match is None:
@@ -201,28 +188,27 @@ class NoteKeeper:
             return datetime.min
         return datetime.strptime(match.group(0), "%d %B %Y %H:%M:%S")
 
-    def _get_book_clippings(
-        self, book: str, author: Optional[str] = None
-    ) -> ClipList:
+    def _get_book_clippings(self, book: str) -> ClipList:
         """
-        Returns all the clippings for a book. Optionally filter by author
-        too. This is to resolve the case where there may be a book with the
-        same title by multiple authors.
+        Returns all the clippings for a book.
         """
         clip_hashes = {}
         try:
             clip_hashes = self._bookclip_map[book]
         except KeyError:
-            print(f"{book!r} does not exist. Check spelling.")
-
-        if author is not None:
-            try:
-                clip_hashes.intersection(self._authorclip_map[author])
-            except KeyError:
-                print(f"{author!r} does not exist. Check spelling.")
+            print(f"{book!r} does not exist.")
 
         clips = [self._clippings[h] for h in clip_hashes]
         return ClipList(clips)
+
+    def get_clippings(self, book: Optional[str] = None) -> ClipList:
+        """
+        Return a list of clippings. If A book is provided get the list by
+        book.
+        """
+        if book is None:
+            return list(self._clippings.values())
+        return self._get_book_clippings(book)
 
     def to_csv(self, file: str, book: Optional[str] = None, sep="\t") -> None:
         """
@@ -233,7 +219,6 @@ class NoteKeeper:
 
         Separator is tab by default.
         """
-
         clippings = self.get_clippings(book)
         clippings.sortby(attribute="date")
         with open(file, "w") as f:
@@ -241,13 +226,3 @@ class NoteKeeper:
             for clip in clippings:
                 f.write(sep.join(clip) + "\n")
 
-    def get_clippings(
-        self, book: Optional[str] = None, author: Optional[str] = None
-    ) -> ClipList:
-        """
-        Return a list of clippings. If book is provided get the list by
-        book.
-        """
-        if book is None and author is None:
-            return list(self._clippings.values())
-        return self._get_book_clippings(book, author)

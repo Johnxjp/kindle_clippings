@@ -8,9 +8,6 @@ Clip = namedtuple(
     "Clip", "book, author, start_location, end_location, date, text"
 )
 
-# TODO: Create List of clips class that is a template of list.
-# Properties incude things like sort by attribute, filter etc.
-
 
 class ClipList(list):
     def __init__(self, clips: Sequence[Clip] = []) -> None:
@@ -26,3 +23,7 @@ class ClipList(list):
                 newlist.append(clip)
 
         return newlist
+
+
+def format_clip(clip: Clip) -> str:
+    pass
