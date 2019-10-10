@@ -1,13 +1,10 @@
-from collections import namedtuple, defaultdict
+from collections import defaultdict
 from datetime import datetime
-import json
-import pickle
 import re
 from typing import Mapping, Sequence, Tuple, Optional
 
-Clip = namedtuple(
-    "Clip", "book_title, author, start_location, end_location, date, text"
-)
+from clips import Clip, ClipList
+
 Hash = int
 
 
@@ -23,10 +20,9 @@ class NoteKeeper:
         In addition, we can easily export and read from CSV.
         """
         self._clippings: Mapping[Hash, Clip] = {}
-        self._book_search: Mapping[str, Mapping[str, Sequence[Hash]]] = {}
-        self._author_search: Mapping[str, Sequence[Hash]] = defaultdict(set)
+        self._bookclip_map: Mapping[str, Sequence[Hash]] = defaultdict(set)
 
-    def load_from_file(self, clippings_filepath: str) -> None:
+    def update_from_file(self, clippings_filepath: str) -> None:
         """
         Loads the clippings from the Amazon Kindle 'My Clippings.txt' file.
 
@@ -44,48 +40,30 @@ class NoteKeeper:
                 # Skip first line if line break as the code was built
                 # on file versions without this.
                 highlights = highlights[1:]
+        self.update_from_list(highlights)
 
+    def update_from_list(self, raw_clips: Sequence[str]) -> None:
+        """
+        Loads the clips from a list of the raw clippings taken from the
+        kindle file
+        """
         n_lines_per_highlight = 5
-        for line_number in range(0, len(highlights), n_lines_per_highlight):
-            highlight_block = highlights[
+        for line_number in range(0, len(raw_clips), n_lines_per_highlight):
+            highlight_block = raw_clips[
                 line_number : line_number + n_lines_per_highlight
             ]
             clip = self._extract_clip(highlight_block)
             # Warning: hash value is truncated to bit value of machine
+            # This may result in different behaviour on different machines
             clip_hash = hash(clip)
             self._clippings[clip_hash] = clip
-            self.update_book_search(clip.book_title, clip.author, clip_hash)
-            self.update_author_search(clip.author, clip_hash)
+            self.update_book_search(clip.book, clip_hash)
 
-        print(f"Extracted {len(self._clippings)} from file.")
-
-    def update_book_search(
-        self, book: str, author: Optional[str], clip_hash: Hash
-    ) -> None:
+    def update_book_search(self, book: str, clip_hash: Hash) -> None:
         """
         Updates the hash map containing clips belonging to books
         """
-        author = author if author is not None else "unknown"
-        if book not in self._book_search:
-            self._book_search[book] = {author: set([clip_hash])}
-        elif author not in self._book_search[book]:
-            self._book_search[book][author] = set([clip_hash])
-        else:
-            self._book_search[book][author].add(clip_hash)
-
-    def update_author_search(
-        self, author: Optional[str], clip_hash: Hash
-    ) -> None:
-        """
-        Updates the hash map containing clips by author
-        """
-        if author is None:
-            return
-
-        if author in self._author_search:
-            self._author_search[author].add(clip_hash)
-        else:
-            self._author_search[author] = set([clip_hash])
+        self._bookclip_map[book].add(clip_hash)
 
     def _extract_clip(self, highlight_block: Sequence[str]) -> Clip:
         """
@@ -181,14 +159,11 @@ class NoteKeeper:
         '- Your Highlight on page 43 | location 973-974 |
         Added on Thursday, 28 January 2016 08:33:31'
         """
-
-        # TODO: What if the location is only on one page?
         pattern = re.compile(r"location (\d+)(-\d+)?", re.IGNORECASE)
         match = re.search(pattern, info)
         if match is None:
             return 0, 0
 
-        print(match.groups())
         start, end = match.groups()  # matches are strings
         if end is None:
             return int(start), int(start)
@@ -214,63 +189,40 @@ class NoteKeeper:
             return datetime.min
         return datetime.strptime(match.group(0), "%d %B %Y %H:%M:%S")
 
-    def get_booklist(self, author=None):
+    def _get_book_clippings(self, book: str) -> ClipList:
         """
-        Returns a list of books. If author is specified, returns the books
-        from that author.
-
-        :param author: string, the name of the author
-        :return: list of strings
+        Returns all the clippings for a book.
         """
-
-        if author is None:
-            return list(self.book_clippings.keys())
-
-        if self.library.get(author) is None:
-            raise Exception("{} is not a valid author name.".format(author))
-
-        return list(self.library[author])
-
-    def get_book_clippings(self, book):
-        """
-        Returns all the clippings for a book
-
-        :param book: string, the name of the book
-        :return: array of strings
-        """
-
-        if self.book_clippings.get(book) is None:
-            raise Exception("{} is not a valid book.".format(book))
-
-        return self.book_clippings[book][1]
-
-    def get_book_author(self, book: str) -> Sequence[str]:
-        """
-        Returns the author of a book
-
-        :param book: string, the name of the book
-        :return: string, author
-        """
+        clip_hashes = {}
         try:
-            return list(self._book_search[book].keys())
+            clip_hashes = self._bookclip_map[book]
         except KeyError:
-            print(f"{book!r} is not a valid book title")
-            return []
+            print(f"{book!r} does not exist.")
 
-    def to_csv(self, file: str, book: Optional[str] = None):
+        clips = [self._clippings[h] for h in clip_hashes]
+        return ClipList(clips)
+
+    def get_clippings(self, book: Optional[str] = None) -> ClipList:
         """
-        Writes all the clippings in the book specified to a text file
-
-        :param book: string, name of the book
-        :param file: string, full file path
-        :return: None
+        Return a list of clippings. If A book is provided get the list by
+        book.
         """
+        if book is None:
+            return list(self._clippings.values())
+        return self._get_book_clippings(book)
 
-        clippings = self.get_book_clippings(book)
+    def to_csv(self, file: str, book: Optional[str] = None, sep="\t") -> None:
+        """
+        Saves all clippings to a csv. By default these are sorted
+        chronologically.
 
+        If book is specified then all clippings for a book are taken
+
+        Separator is tab by default.
+        """
+        clippings = self.get_clippings(book)
+        clippings.sortby(attribute="date")
         with open(file, "w") as f:
-            for line in clippings:
-                f.write(line + "\n")
-
-    def write_to_evernote(self, book):
-        pass
+            f.write(sep.join(Clip._fields) + "\n")  # Header
+            for clip in clippings:
+                f.write(sep.join(clip) + "\n")

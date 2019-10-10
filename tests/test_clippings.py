@@ -1,6 +1,7 @@
 import pytest
 from datetime import datetime
-from clippings import Clip, NoteKeeper
+from notekeeper import NoteKeeper
+from clips import Clip, ClipList
 
 
 @pytest.fixture
