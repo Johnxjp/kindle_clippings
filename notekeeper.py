@@ -47,17 +47,20 @@ class NoteKeeper:
         Loads the clips from a list of the raw clippings taken from the
         kindle file
         """
-        n_lines_per_highlight = 5
-        for line_number in range(0, len(raw_clips), n_lines_per_highlight):
-            highlight_block = raw_clips[
-                line_number : line_number + n_lines_per_highlight
-            ]
-            clip = self._extract_clip(highlight_block)
-            # Warning: hash value is truncated to bit value of machine
-            # This may result in different behaviour on different machines
-            clip_hash = hash(clip)
-            self._clippings[clip_hash] = clip
-            self.update_book_search(clip.book, clip_hash)
+        highlight_block = []
+        for line in raw_clips:
+            line = line.strip()
+            # parse a block
+            if line == "==========":
+                clip = self._extract_clip(highlight_block)
+                # Warning: hash value is truncated to bit value of machine
+                # This may result in different behaviour on different machines
+                clip_hash = hash(clip)
+                self._clippings[clip_hash] = clip
+                self.update_book_search(clip.book, clip_hash)
+                highlight_block = []
+            else:
+                highlight_block.append(line)
 
     def update_book_search(self, book: str, clip_hash: Hash) -> None:
         """
@@ -73,7 +76,7 @@ class NoteKeeper:
         """
         book_author_line = highlight_block[0]
         location_date_line = highlight_block[1]
-        text = highlight_block[3]
+        text = " ".join(highlight_block[3:])
 
         book = NoteKeeper._extract_book_title(book_author_line)
         author = NoteKeeper._extract_author(book_author_line)

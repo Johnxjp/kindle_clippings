@@ -139,7 +139,6 @@ def test_extract_date(input, expected_date):
                 "- Your Highlight location 1085-1086 | Added on Monday, 29 May 2016 10:00:31",
                 "",
                 "some text",
-                "=========",
             ],
             Clip(
                 "Autobiography of Lincoln",

@@ -132,7 +132,6 @@ def test_extract_date(input, expected_date):
                 "- Your Highlight location 1085-1086 | Added on Monday, 29 May 2016 10:00:31",
                 "",
                 "some text",
-                "=========",
             ],
             Clip(
                 "Autobiography of Lincoln",
@@ -155,44 +154,18 @@ def test_extract_clip(notekeeper, input, expected):
     [
         (
             [
-                ("author1", 123),
-                ("author2", 123),
-                (None, 123),
-                ("author1", 123),
-                ("author1", 432),
+                ("book1", 123),
+                ("book1", 123),
+                ("book2", 123),
+                ("book3", 123),
+                ("book2", 432),
             ],
-            {"author1": {123, 432}, "author2": {123}},
-        )
-    ],
-)
-def test_update_author_map(notekeeper, input, expected):
-    for author, clip_hash in input:
-        notekeeper.update_author_search(author, clip_hash)
-
-    assert notekeeper._author_search == expected
-
-
-@pytest.mark.parametrize(
-    "input, expected",
-    [
-        (
-            [
-                ("book1", "author1", 123),
-                ("book1", "author2", 123),
-                ("book2", None, 123),
-                ("book3", "author1", 123),
-                ("book2", "author1", 432),
-            ],
-            {
-                "book1": {"author1": {123}, "author2": {123}},
-                "book2": {"unknown": {123}, "author1": {432}},
-                "book3": {"author1": {123}},
-            },
+            {"book1": {123}, "book2": {123, 432}, "book3": {123}},
         )
     ],
 )
 def test_update_book_map(notekeeper, input, expected):
-    for book, author, clip_hash in input:
-        notekeeper.update_book_search(book, author, clip_hash)
+    for book, clip_hash in input:
+        notekeeper.update_book_search(book, clip_hash)
 
-    assert notekeeper._book_search == expected
+    assert notekeeper._bookclip_map == expected
